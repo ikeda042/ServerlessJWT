@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Any, Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -7,9 +7,11 @@ from jose import JWTError, jwt
 from pydantic import BaseModel, ValidationError
 
 API_PREFIX = "/api/v1"
+TEST_API_PREFIX = f"{API_PREFIX}/test"
 JWT_SECRET = "test-only-secret-key"
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+SUPPORTED_SIGNING_ALGORITHMS = {"HS256", "RS256"}
 
 TEST_ACCOUNT = "test-user"
 TEST_PASSWORD = "test-password"
@@ -27,7 +29,8 @@ app = FastAPI(
     openapi_url=f"{API_PREFIX}/openapi.json",
     redoc_url=None,
 )
-router = APIRouter(prefix=API_PREFIX)
+production_router = APIRouter(prefix=API_PREFIX)
+test_router = APIRouter(prefix=TEST_API_PREFIX)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -50,6 +53,17 @@ class ProtectedResponse(BaseModel):
     account: str
 
 
+class JwtCreateRequest(BaseModel):
+    alg: str
+    signing_key: str
+    payload: dict[str, Any]
+
+
+class JwtCreateResponse(BaseModel):
+    token: str
+    alg: str
+
+
 def create_access_token(account: str) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
@@ -69,6 +83,25 @@ def decode_access_token(token: str) -> TokenPayload:
         raise UNAUTHORIZED_EXCEPTION from exc
 
 
+def validate_signing_algorithm(alg: str) -> str:
+    if alg not in SUPPORTED_SIGNING_ALGORITHMS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported alg. Use HS256 or RS256.",
+        )
+    return alg
+
+
+def create_signed_jwt(payload: dict[str, Any], signing_key: str, alg: str) -> str:
+    try:
+        return jwt.encode(payload, signing_key, algorithm=validate_signing_algorithm(alg))
+    except (JWTError, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to create JWT with the provided signing key or payload.",
+        ) from exc
+
+
 def get_current_account(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
@@ -80,16 +113,29 @@ def get_current_account(
     return decode_access_token(credentials.credentials).sub
 
 
-@router.post("/token", response_model=TokenResponse)
+@production_router.post("/token", response_model=JwtCreateResponse)
+def issue_custom_jwt(payload: JwtCreateRequest) -> JwtCreateResponse:
+    return JwtCreateResponse(
+        token=create_signed_jwt(
+            payload=payload.payload,
+            signing_key=payload.signing_key,
+            alg=payload.alg,
+        ),
+        alg=payload.alg,
+    )
+
+
+@test_router.post("/token", response_model=TokenResponse)
 def issue_access_token(payload: LoginRequest) -> TokenResponse:
     if payload.account != TEST_ACCOUNT or payload.password != TEST_PASSWORD:
         raise UNAUTHORIZED_EXCEPTION
     return TokenResponse(access_token=create_access_token(payload.account))
 
 
-@router.get("/protected", response_model=ProtectedResponse)
+@test_router.get("/protected", response_model=ProtectedResponse)
 def read_protected(current_account: Annotated[str, Depends(get_current_account)]):
     return ProtectedResponse(account=current_account)
 
 
-app.include_router(router)
+app.include_router(production_router)
+app.include_router(test_router)
