@@ -4,6 +4,11 @@ Vercel 上で公開している Swagger UI は [https://jwt.ikeda042.homes/api/v
 
 API のベースパスは `https://jwt.ikeda042.homes/api/v1` である。
 
+テスト用エンドポイントは `https://jwt.ikeda042.homes/api/v1/test` 配下である。
+
+本番用 JWT 発行エンドポイントは `POST https://jwt.ikeda042.homes/api/v1/token` である。
+`alg` には `HS256` または `RS256` のみを指定できる。`signing_key` には、`HS256` の場合は共有シークレット、`RS256` の場合は PEM 形式の秘密鍵文字列を渡す。
+
 テスト用の認証情報は以下のとおりである。
 
 - `account`: `test-user`
@@ -11,10 +16,10 @@ API のベースパスは `https://jwt.ikeda042.homes/api/v1` である。
 
 ## cURL Examples
 
-トークンを取得する:
+テスト用トークンを取得する:
 
 ```bash
-curl -X POST "https://jwt.ikeda042.homes/api/v1/token" \
+curl -X POST "https://jwt.ikeda042.homes/api/v1/test/token" \
   -H "Content-Type: application/json" \
   -d '{
     "account": "test-user",
@@ -27,6 +32,22 @@ curl -X POST "https://jwt.ikeda042.homes/api/v1/token" \
 ```bash
 TOKEN="PASTE_ACCESS_TOKEN_HERE"
 
-curl "https://jwt.ikeda042.homes/api/v1/protected" \
+curl "https://jwt.ikeda042.homes/api/v1/test/protected" \
   -H "Authorization: Bearer ${TOKEN}"
+```
+
+本番用 JWT を `HS256` で生成する:
+
+```bash
+curl -X POST "https://jwt.ikeda042.homes/api/v1/token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alg": "HS256",
+    "signing_key": "your-shared-secret",
+    "payload": {
+      "sub": "account-123",
+      "name": "example-user",
+      "role": "admin"
+    }
+  }'
 ```
