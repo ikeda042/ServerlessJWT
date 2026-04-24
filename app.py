@@ -4,7 +4,7 @@ from typing import Any, Annotated
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 API_PREFIX = "/api/v1"
 TEST_API_PREFIX = f"{API_PREFIX}/test"
@@ -12,6 +12,10 @@ JWT_SECRET = "test-only-secret-key"
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 SUPPORTED_SIGNING_ALGORITHMS = {"HS256", "RS256"}
+DEFAULT_JWT_ISSUER = "https://jwt.ikeda042.home/api/v1/"
+DEFAULT_JWT_EXPIRE_HOURS = 1
+DEFAULT_JWT_USER_NAME = "ikeda042"
+DEFAULT_JWT_SCOPE = "admin"
 
 TEST_ACCOUNT = "test-user"
 TEST_PASSWORD = "test-password"
@@ -32,6 +36,16 @@ app = FastAPI(
 production_router = APIRouter(prefix=API_PREFIX)
 test_router = APIRouter(prefix=TEST_API_PREFIX)
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def create_default_jwt_payload() -> dict[str, Any]:
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=DEFAULT_JWT_EXPIRE_HOURS)
+    return {
+        "iss": DEFAULT_JWT_ISSUER,
+        "exp": int(expires_at.timestamp()),
+        "user_name": DEFAULT_JWT_USER_NAME,
+        "scope": DEFAULT_JWT_SCOPE,
+    }
 
 
 class LoginRequest(BaseModel):
@@ -56,7 +70,10 @@ class ProtectedResponse(BaseModel):
 class JwtCreateRequest(BaseModel):
     alg: str
     signing_key: str
-    payload: dict[str, Any]
+    payload: dict[str, Any] = Field(
+        default_factory=create_default_jwt_payload,
+        json_schema_extra={"example": create_default_jwt_payload()},
+    )
 
 
 class JwtCreateResponse(BaseModel):
