@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, ValidationError
@@ -64,6 +64,12 @@ class JwtCreateResponse(BaseModel):
     alg: str
 
 
+class JwtVerifyResponse(BaseModel):
+    valid: bool
+    alg: str
+    payload: dict[str, Any]
+
+
 def create_access_token(account: str) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
@@ -102,6 +108,20 @@ def create_signed_jwt(payload: dict[str, Any], signing_key: str, alg: str) -> st
         ) from exc
 
 
+def verify_signed_jwt(token: str, verification_key: str, alg: str) -> dict[str, Any]:
+    try:
+        return jwt.decode(
+            token,
+            verification_key,
+            algorithms=[validate_signing_algorithm(alg)],
+        )
+    except (JWTError, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to verify JWT with the provided verification key or token.",
+        ) from exc
+
+
 def get_current_account(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
@@ -122,6 +142,31 @@ def issue_custom_jwt(payload: JwtCreateRequest) -> JwtCreateResponse:
             alg=payload.alg,
         ),
         alg=payload.alg,
+    )
+
+
+@production_router.get("/token", response_model=JwtVerifyResponse)
+def verify_custom_jwt(
+    token: Annotated[str, Query(description="JWT to verify")],
+    alg: Annotated[str, Query(description="Expected signing algorithm: HS256 or RS256")],
+    verification_key: Annotated[
+        str,
+        Query(
+            description=(
+                "Verification key. Use the shared secret for HS256 or the public key "
+                "for RS256."
+            ),
+        ),
+    ],
+) -> JwtVerifyResponse:
+    return JwtVerifyResponse(
+        valid=True,
+        alg=alg,
+        payload=verify_signed_jwt(
+            token=token,
+            verification_key=verification_key,
+            alg=alg,
+        ),
     )
 
 
